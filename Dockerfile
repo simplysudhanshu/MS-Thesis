@@ -1,11 +1,12 @@
 FROM ubuntu:latest
 LABEL tag=btq-v1
-SHELL ["/bin/bash", "-c"]
+SHELL ["/bin/bash", "-i", "-c"]
+COPY init.sh init.sh
 RUN apt-get -y update && apt-get -y upgrade
 RUN apt install -y git curl
-RUN git clone https://github.com/simplysudhanshu/bits_to_qubits.git
-RUN chmod +x init.sh \
-    ./init.sh
+RUN chmod +x init.sh && ./init.sh 2>&1 | tee init_logs
 
-# docker build -t btq:v1 .
+# ENTRYPOINT [ "git", "clone",  "https://github.com/simplysudhanshu/bits_to_qubits.git" ]
+
+# docker build --no-cache --pull -t btq:v1 .
 # docker run -d -t --name btq-container btq:v1

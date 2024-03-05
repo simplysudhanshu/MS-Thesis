@@ -1,0 +1,13 @@
+qiskit
+qiskit[visualization]
+qiskit-ibmq-provider
+qiskit-aer
+pylatexenc
+notebook
+pytest
+matplotlib
+numpy
+scipy
+cupy
+pyqt
+mpi4py
