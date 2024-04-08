@@ -2,6 +2,9 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+## Sample: https://github.com/NVIDIA/cuQuantum/blob/main/python/samples/custatevec/diagonal_matrix.py
+
+
 import numpy as np
 import cupy as cp
 

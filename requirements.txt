@@ -1,7 +1,4 @@
 qiskit
-qiskit[visualization]
-qiskit-ibmq-provider
-qiskit-aer
 pylatexenc
 notebook
 pytest
