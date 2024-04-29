@@ -1,0 +1,15 @@
+#!/bin/bash -l
+#SBATCH --qos=debug
+#SBATCH --nodes=1
+#SBATCH --time=00:10:00
+#SBATCH --licenses=cfs
+#SBATCH --constraint=cpu
+#SBATCH --account=m3930
+#SBATCH --job-name=btq_trial_runs
+#SBATCH --output=job-btq.o%j
+#SBATCH --error=job-btq.e%j
+
+conda activate /global/u1/s/simply/.venv/btq-venv
+cd /global/homes/s/simply/bits_to_qubits
+python framework.py
+conda deactivate

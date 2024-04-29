@@ -2,6 +2,7 @@ from qiskit import QuantumRegister, ClassicalRegister, AncillaRegister, QuantumC
 from qiskit.quantum_info import Statevector, Operator
 from qiskit_aer import Aer 
 from qiskit import transpile, assemble
+from qiskit.result.utils import marginal_distribution
 from qiskit.visualization import plot_histogram, plot_bloch_multivector, plot_distribution, plot_state_qsphere
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,8 +34,8 @@ def getInput(n = 4, verbose = False) -> tuple[np.ndarray, np.ndarray]:
 
 #___________________________________
 # ENCODER
-def qubitLatticeEncoder(qc: QuantumCircuit, angles: np.array, measure = False, verbose = False):
-    """Add Qubit Lattice encoding model to a blank circuit.
+def phaseEncoder(qc: QuantumCircuit, angles: np.array, measure = False, verbose = False):
+    """Add Phase encoding model to a blank circuit.
 
     Args:
         qc (QuantumCircuit): _description_
@@ -51,12 +52,18 @@ def qubitLatticeEncoder(qc: QuantumCircuit, angles: np.array, measure = False, v
     qc.add_register(q, c)
 
     for i, ang in enumerate(angles):
-        qc.ry(ang, i)
+        qc.h(i)
+        qc.p(ang, i)
     
+    qc.barrier()
+
+    for i in range(len(angles)):
+        qc.h(i)
+
     sv = Statevector(qc)
     if verbose: print(sv)
     
-    if measure: qc.measure(reversed(range(len(angles))), range(len(angles)))
+    if measure: qc.measure(range(len(angles)), range(len(angles)))
     else: qc.barrier()
 
     return sv
@@ -75,7 +82,7 @@ def invertPixels(qc: QuantumCircuit, verbose = False):
 #___________________________________
 # Measurements
 def addMeasurements(qc: QuantumCircuit, verbose = False):
-    qc.measure(list(reversed(range(qc.num_qubits))), list(range(qc.cregs[0].size)))
+    qc.measure(list(range(qc.num_qubits)), list(range(qc.cregs[0].size)))
     
     if verbose: print(f"Adding Measurments:\n{qc}")
 
@@ -99,16 +106,20 @@ def simulate(qc: QuantumCircuit, shots = 1000000, verbose = False):
 
 #___________________________________
 # DECODE
-def qubitLatticeDecoder(counts, n = 4, shots = 1000000, verbose = False):
-    output_values = np.zeros(n)
+def phaseDecoder(counts, n = 4, shots = 1000000, verbose = False):
+    output_values = []
 
-    for item in counts:    
-        for i, bit in enumerate(item):
-            if bit == '0':
-                output_values[i] += counts[item]
+    for  iq in range(n):
+        marCnt=marginal_distribution(counts,[iq])
+        #print('iq:',iq,marCnt)
+        if '1' in marCnt:
+            prob=marCnt['1']/shots
+        else:
+            prob=0
+        ev=1-2*prob
+        output_values.append(np.arccos(ev))
     
-    reconstruct = [2*np.arccos((value/shots)**(1/2)) for value in output_values]
-    reconstruct = np.interp(reconstruct, (0, np.pi), (0, 255)).astype(int)
+    output_values = np.interp(output_values, (0, np.pi), (0, 255)).astype(int)
 
     # RECONSTRUCT
     if verbose:
@@ -121,7 +132,7 @@ def qubitLatticeDecoder(counts, n = 4, shots = 1000000, verbose = False):
             print(f"\tarccos = {np.arccos((value/shots)**(1/2))}")
             print(f"\t2 * arccos = {2*np.arccos((value/shots)**(1/2))}")
 
-    return list(reconstruct)
+    return list(output_values)
 
 #___________________________________
 # Compare
@@ -137,11 +148,11 @@ def plot_to_compare(input_vector, output_vector, verbose = False):
 
 # TODO
 #___________________________________
-def testQubitLattice(n=4):
+def testPhase(n=4):
     pass
 
 
 if __name__ == "__main__":
     qc = QuantumCircuit()
-    qubitLatticeEncoder(qc, [0, 0.5, 0.6, 0.7])
+    phaseEncoder(qc, [0, 0.5, 0.6, 0.7])
     addMeasurements(qc, True)
