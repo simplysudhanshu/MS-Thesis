@@ -9,6 +9,8 @@
 #SBATCH --output=job-btq.o%j
 #SBATCH --error=job-btq.e%j
 
+module load python
+module load conda
 conda activate /global/u1/s/simply/.venv/btq-venv
 cd /global/homes/s/simply/bits_to_qubits
 python framework.py
