@@ -49,6 +49,7 @@ experiment_dict = {
 }
 
 shots_dict = { 
+    "name": "FRQI",
     "shots": [], 
     "runtimes": [],
     "accuracy": [] 
@@ -56,7 +57,7 @@ shots_dict = {
 
 backend_comparison_dict = {
     "name": "FRQI",
-    "backend": ["StateVec", "Pure Sim", "Noisy Sim", "IBMQ_Manilla"],
+    "backend": ["StateVec", "Pure Sim", "Noisy Sim", "IBMQ"],
     "size": [4, 16, 64, 256],
     "runtimes": [[5, 10, 15, 20],
                 [27, 28, 29, 36],
@@ -581,7 +582,7 @@ Error violins
 '''
 #__________________________________
 def plot_supermarq(exp):
-    print("\033[K", f"Plotting SupermarQ", end='\r')
+    print("\033[K", f"Plotting smQ", end='\r')
     supermarq_metrics.plot_benchmark(data=[exp['widths'], exp['supermarq_metrics']], show=False, savefn=os.path.join("experiment_data_vis", "Qubit Lattice_supermarq"))
 
 #__________________________________

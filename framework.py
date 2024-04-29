@@ -56,7 +56,7 @@ ibmq_backend = None
 # Qiskit Backends
 ''' Noisy backend'''
 def setupNoisyBackend():
-    qiskitService = QiskitRuntimeService(channel="ibm_quantum", token="b58f04be6f1a8412295c8b59c3e19af21d1c9501d28ca176687d5c3f49338f0211c08461348a978c07dcecc76de10675f84deb366634b56c3a8ac0514085be5c")
+    qiskitService = QiskitRuntimeService(channel="ibm_quantum", token="")
 
     ''' Noisy model from AER: https://qiskit.github.io/qiskit-aer/stubs/qiskit_aer.noise.NoiseModel.html '''
     # Get a fake backend from the fake provider
@@ -79,7 +79,7 @@ def setupNoisyBackend():
 
 ''' IBMQ Hardware '''
 def setupIBMQBackend():
-    qiskitService = QiskitRuntimeService(channel="ibm_quantum", token="b58f04be6f1a8412295c8b59c3e19af21d1c9501d28ca176687d5c3f49338f0211c08461348a978c07dcecc76de10675f84deb366634b56c3a8ac0514085be5c")
+    qiskitService = QiskitRuntimeService(channel="ibm_quantum", token="")
     # To run on hardware, select the backend with the fewest number of jobs in the queue
     ibmq_backend = qiskitService.least_busy(operational=True, simulator=False)
 
@@ -514,13 +514,13 @@ if __name__ == "__main__":
     if len(sys.argv) > 3 and sys.argv[3] in ["reversing", "random", "linear"]: 
         dist = sys.argv[2]
 
-    if experiments in ["all", "ql", "ph", "frqi"]: 
+    if experiments in ["all", "ql", "ph", "frqi", "backend"]: 
         setupNoisyBackend()
         ql_ph_inputs = square_inputs(5)
         frqi_inputs = power_inputs(4)
         exp_list = []
 
-    print(f"\n- BTQ - Trial runs\t[{shots if experiments != "shots" else '[5000, ..., 100000]'} shots - {dist} input - {experiments} experiments]\n")
+    print(f"\n- BTQ - Trial runs\t[{shots if experiments != 'shots' else '[5000, ..., 100000]'} shots - {dist} input - {experiments} experiments]\n")
 
     if experiments in ["all", "ql"]:
         #----------------------------------
@@ -564,7 +564,7 @@ if __name__ == "__main__":
         exp_list.append(exp)
         
         # save plots
-        btq_plotter.plot(exp=exp, save=True)
+        btq_plotter.plot(exp_dict=exp)
     
     if experiments in ["all", "ph"]:
         #----------------------------------
@@ -608,7 +608,7 @@ if __name__ == "__main__":
         exp_list.append(exp)
         
         # save plots
-        btq_plotter.plot(exp=exp, save=True)
+        btq_plotter.plot(exp_dict=exp)
     
     if experiments in ["all", "frqi"]:
         #----------------------------------
@@ -656,7 +656,7 @@ if __name__ == "__main__":
         exp_list.append(exp)
         
         # save plots
-        btq_plotter.plot(exp=exp, save=True)
+        btq_plotter.plot(exp_dict=exp)
 
         with open(os.path.join("experiment_data", f"exp_{time.strftime('%Y-%m-%d')}.pkl"), 'wb') as f:
             pickle.dump(exp_list, f)
@@ -669,7 +669,7 @@ if __name__ == "__main__":
 
         for i, shot in enumerate(sorted(set([5000, 10000, 25000, 50000, 75000, 100000] + [shots]))):
             
-            print("\033[K", f"\t{i+1}/{len([5000, 10000, 25000, 50000, 75000, 100000] + [shots])} - {shot}", end='\r')
+            print("\033[K", f"\t{i+1}/{len([5000, 10000, 25000, 50000, 75000, 100000] + [shots]) - 1} - {shot}", end='\r')
 
             try:
                 shots_dict['shots'].append(shot)
@@ -694,4 +694,42 @@ if __name__ == "__main__":
     # =========================
     elif experiments == "ibmq":
         setupIBMQBackend()
-    
+
+        print(f"FRQI Experiments")
+
+        exp = btq_plotter.get_dict("backend")
+
+        for i, input in enumerate(frqi_inputs):
+            exp['size'].append(input)
+
+            # StateVec
+            init_time = time.process_time()
+            exp, circuit, accuracy = frqiExperiment(n=input, run_simulation=True, noisy=True, dist=dist, shots=shots)
+            
+            logger.info(f'{{"Profiler":"Algorithm Runtime", "runtime":"{time.process_time() - init_time}","Exp":"FRQI_backend,{input},{shots}"}}')
+            exp["runtimes"][i].append(time.process_time() - init_time)
+            exp["accuracy"][i].append(accuracy)
+
+            # Pure
+            init_time = time.process_time()
+            exp, circuit, accuracy = frqiExperiment(n=input, run_simulation=True, noisy=False, dist=dist, shots=shots)
+            
+            logger.info(f'{{"Profiler":"Algorithm Runtime", "runtime":"{time.process_time() - init_time}","Exp":"FRQI_backend,{input},{shots}"}}')
+            exp["runtimes"][i].append(time.process_time() - init_time)
+            exp["accuracy"][i].append(accuracy)
+
+            # Noisy
+            init_time = time.process_time()
+            exp, circuit, accuracy = frqiExperiment(n=input, run_simulation=True, noisy=True, dist=dist, shots=shots)
+            
+            logger.info(f'{{"Profiler":"Algorithm Runtime", "runtime":"{time.process_time() - init_time}","Exp":"FRQI_backend,{input},{shots}"}}')
+            exp["runtimes"][i].append(time.process_time() - init_time)
+            exp["accuracy"][i].append(accuracy)
+
+            # IBMQ
+            init_time = time.process_time()
+            exp, circuit, accuracy = frqiExperiment(n=input, run_simulation=True, noisy=False, dist=dist, shots=shots, backend="ibmq")
+            
+            logger.info(f'{{"Profiler":"Algorithm Runtime", "runtime":"{time.process_time() - init_time}","Exp":"FRQI_backend,{input},{shots}"}}')
+            exp["runtimes"][i].append(time.process_time() - init_time)
+            exp["accuracy"][i].append(accuracy)
