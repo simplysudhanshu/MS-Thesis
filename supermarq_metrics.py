@@ -16,6 +16,11 @@ from matplotlib.patches import Circle
 from matplotlib.projections import register_projection
 from matplotlib.projections.polar import PolarAxes
 
+def compute_multi_qubit_ops(dag):
+    for node in dag.topological_op_nodes():
+        if node.op.num_qubits > 1:
+            yield(node)
+             
 def compute_communication_with_qiskit(circuit: qiskit.QuantumCircuit) -> float:
     """Compute the program communication of the given quantum circuit.
 
@@ -177,7 +182,7 @@ def compute_all(qc: qiskit.QuantumCircuit):
         compute_communication_with_qiskit(qc),
         compute_liveness_with_qiskit(qc),
         compute_parallelism_with_qiskit(qc),
-        compute_measurement_with_qiskit(qc),
+        # compute_measurement_with_qiskit(qc),
         compute_entanglement_with_qiskit(qc),
         compute_depth_with_qiskit(qc)
     ]
@@ -200,7 +205,7 @@ def plot_benchmark(
         legend_loc: Optional argument to fine tune the legend placement.
     """
     if spoke_labels is None:
-        spoke_labels = ["Connectivity", "Liveness", "Parallelism", "Measurement", "Entanglement", "Depth"]
+        spoke_labels = ["Connectivity", "Liveness", "Parallelism", "Entanglement", "Depth"]
 
     num_spokes = len(spoke_labels)
     theta = radar_factory(num_spokes)
@@ -227,7 +232,7 @@ def plot_benchmark(
 
     if savefn is not None:
         # Don't want to save figures when running tests
-        plt.savefig(savefn)  # pragma: no cover
+        plt.savefig(savefn, bbox_inches='tight')  # pragma: no cover
 
     if show:
         # Tests will hang if we show figures during tests

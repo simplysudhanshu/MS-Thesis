@@ -10,6 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+import matplotlib.transforms as mtrans
 
 import supermarq_metrics
 
@@ -21,13 +22,11 @@ experiment_dict = {
     "shots": [],
     "runtimes":{
         "Encoder": [],
-        "Invert + Measurement": [],
         "Transpile": [],
         "Simulate": [],
         "Decoder": [],
         "Algorithm Runtime": [],
         "Noisy Encoder": [],
-        "Noisy Invert + Measurement": [],
         "Noisy Transpile": [],
         "Noisy Simulate": [],
         "Noisy Decoder": [],
@@ -42,10 +41,39 @@ experiment_dict = {
     "widths": [],
     "accuracy": [],
     "noisy_accuracy": [],
+    "fidelities": [],
     "supermarq_metrics": [],
     "count_ops": [],
     "data_points": [],
     "noisy_data_points": []
+}
+
+ibmq_experiment_dict = {
+    "name": None,
+    "size": [],
+    "shots": [],
+    "runtimes":{
+        "Encoder": [],
+        "Invert + Measurement": [],
+        "Transpile": [],
+        "Simulate": [],
+        "Decoder": [],
+        "Algorithm Runtime": [],
+    },
+    "depths": {
+        "Encoder": [],
+        "Invert + Measurement": [],
+        "Transpile": [],
+        "Simulate": []
+    },
+    "widths": [],
+    "accuracy": [],
+    "fidelity": [],
+    "supermarq_metrics": [],
+    "count_ops": [],
+    "data_points": [],
+    "jobs": [],
+    "meta_Data": None
 }
 
 shots_dict = { 
@@ -82,9 +110,14 @@ global_n_diffs = {
     "FRQI": [[], []] 
 }
 
+# global_sizes = np.array([4, 9, 16, 25, 64, 256]).astype(int)
+global_sizes = np.array([4, 9, 16, 64, 256]).astype(int)
+
+global_colors = {'Qubit Lattice': 'darkorange', 'Phase': "limegreen", "FRQI": "royalblue"}
+global_markers = {'Qubit Lattice': "o", 'Phase': "*", "FRQI": "P"}
+
 # setup directory for storing images
 os.makedirs("./experiment_data_vis", exist_ok=True)
-# color_map = ['tab:blue','tab:cyan','tab:green','yellow', 'tab:orange', 'tab:red']
 
 '''
 Utils
@@ -100,6 +133,8 @@ def get_dict(dict_type="exp"):
     elif dict_type == "backend":
         return copy.deepcopy(backend_comparison_dict)
 
+    elif dict_type == "ibmq":
+        return copy.deepcopy(ibmq_experiment_dict)
 
 #__________________________________
 # highlight a cell in imshow
@@ -110,6 +145,37 @@ def highlight_cell(x,y, ax=None, **kwargs):
     return rect 
 
 #__________________________________
+# Calculate total_runtime
+def calculate_total_algorithm_runtime(exp):
+    try:
+        for i in range(len(exp['size'])):
+            exp['runtimes']['Algorithm Runtime'].append(sum(v[i] for k,v in exp['runtimes'].items() if not k.startswith('Noisy') and k != "Algorithm Runtime"))
+            exp['runtimes']['Noisy Algorithm Runtime'].append(sum(v[i] for k,v in exp['runtimes'].items() if k.startswith('Noisy') and k != "Noisy Algorithm Runtime"))
+   
+    except Exception as e:
+        print(f"! ERROR while plotting !\n\t{traceback.format_exc()}\nDict:\n\t{exp or shots_dict}\n")
+
+#__________________________________
+# Add nan at appropriate places and mask them to match local_size to global_sizes
+def get_masked_data(data, sizes):
+    local_size_len = len(sizes)
+    global_size_len = len(global_sizes)
+
+    j = 0
+    for i in range(global_size_len):            
+        if j >= local_size_len:
+            data.insert(i, None) 
+
+        elif global_sizes[i] != sizes[j]:
+            data.insert(i, None)
+
+        else: j += 1
+
+    data = np.array(data).astype(np.double)
+    return data, np.isfinite(data)
+    
+#__________________________________
+# Parse the log file
 def parse_log(filename):
     try:
         logs = open(filename, "r")
@@ -175,7 +241,7 @@ Runtime bars
 '''
 #__________________________________
 def plot_runtimes(exp):
-    print("\033[K", f"Plotting Runtimes", end='\r')
+    print("\033[K" f"Plotting Runtimes", end='\r')
 
     sizeLables = [str(x) for x in exp['size']]
     sizeValues = np.arange(len(sizeLables))
@@ -188,55 +254,130 @@ def plot_runtimes(exp):
     # simulate_perc = [x*100/y for x,y in zip(simulate_sum, exp['runtimes']['Algorithm Runtime'])]
     
     # decode_perc = [x*100/y for x,y in zip(exp['runtimes']['Decoder'], exp['runtimes']['Algorithm Runtime'])]
-
-    fig, ax = plt.subplots()
-
-    b = ax.bar(sizeValues, exp['runtimes']['Encoder'], color="dodgerblue", zorder=3)
-    ax.bar_label(b, ["%.2f" % x for x in exp['runtimes']['Encoder']], color="k")
-
-    ax.set_xticks(sizeValues)
-    ax.set_xticklabels(sizeLables)
-    ax.set_xlabel("Problem Size")
-
-    ax.set_ylim([0, 1.1*max(exp['runtimes']['Encoder'])])
-    ax.set_ylabel("Runtime (s)")
-
-    ax.grid(axis='y', alpha=0.5, linestyle="dotted", zorder=0)
-
-    fig.tight_layout()
     
-    plt.savefig(os.path.join("experiment_data_vis", f"{exp['name']}_encoding_runtimes"))
-    plt.close()
+    # check the exponential rate and break axis if the difference is high
+    if sorted(exp['runtimes']['Encoder'], reverse=True)[0]/sorted(exp['runtimes']['Encoder'], reverse=True)[1] > 10:
+        fig, (ax, ax2) = plt.subplots(2, 1, sharex=True)
+
+        b = ax.bar(sizeValues, exp['runtimes']['Encoder'], color="dodgerblue", zorder=3)
+        b2 = ax2.bar(sizeValues, exp['runtimes']['Encoder'], color="dodgerblue", zorder=3)
+        ax.bar_label(b, ["%.3f" % x for x in exp['runtimes']['Encoder']], color="k")
+        ax2.bar_label(b2, ["%.3f" % x for x in exp['runtimes']['Encoder']], color="k")
+
+        ax.set_xticks(sizeValues)
+        ax.set_xticklabels(sizeLables)
+
+        ax.set_ylim([0.5*max(exp['runtimes']['Encoder']), 1.1*max(exp['runtimes']['Encoder'])])
+        ax2.set_ylim([0, math.ceil(sorted(exp['runtimes']['Encoder'], reverse=True)[1])])
+
+        # ax.set_yscale('logit')
+        ax.spines.bottom.set_visible(False)
+        ax2.spines.top.set_visible(False)
+        ax.xaxis.tick_top()
+        ax.tick_params(labeltop=False)  # don't put tick labels at the top
+        ax2.xaxis.tick_bottom()
+
+        d = .5  # proportion of vertical to horizontal extent of the slanted line
+        kwargs = dict(marker=[(-1, -d), (1, d)], markersize=12,
+                    linestyle="none", color='k', mec='k', mew=1, clip_on=False)
+        ax.plot([0, 1], [0, 0], transform=ax.transAxes, **kwargs)
+        ax2.plot([0, 1], [1, 1], transform=ax2.transAxes, **kwargs)
+
+        ax.grid(axis='y', alpha=0.5, linestyle="dotted", zorder=0)
+        ax2.grid(axis='y', alpha=0.5, linestyle="dotted", zorder=0)
+
+        fig.tight_layout(rect=[0.025, 0.025, 1, 1])
+        fig.supylabel('Runtime (s)')
+        fig.supxlabel("Input Size")
+        plt.savefig(os.path.join("experiment_data_vis", f"{exp['name']}_encoding_runtimes"))
+        plt.close()
+   
+    else:
+        fig, ax = plt.subplots()
+
+        b = ax.bar(sizeValues, exp['runtimes']['Encoder'], color="dodgerblue", zorder=3)
+        ax.bar_label(b, ["%.3f" % x for x in exp['runtimes']['Encoder']], color="k")
+
+        ax.set_xticks(sizeValues)
+        ax.set_xticklabels(sizeLables)
+        ax.set_xlabel("Input Size")
+
+        ax.set_ylim([0, 1.1*max(exp['runtimes']['Encoder'])])
+        ax.set_ylabel("Runtime (s)")
+
+        ax.grid(axis='y', alpha=0.5, linestyle="dotted", zorder=0)
+
+        fig.tight_layout()
+        
+        plt.savefig(os.path.join("experiment_data_vis", f"{exp['name']}_encoding_runtimes"))
+        plt.close()
 
 
     #-------
-    fig, ax = plt.subplots()
+    if sorted(exp['runtimes']['Algorithm Runtime'], reverse=True)[0]/sorted(exp['runtimes']['Algorithm Runtime'], reverse=True)[1] > 10:
+        fig, (ax, ax2) = plt.subplots(2, 1, sharex=True)
 
-    b = ax.bar(sizeValues, exp['runtimes']['Algorithm Runtime'], color="deeppink", zorder=3)
-    ax.bar_label(b, ["%.2f" % x for x in exp['runtimes']['Algorithm Runtime']], color="k")
+        b = ax.bar(sizeValues, exp['runtimes']['Algorithm Runtime'], color="deeppink", zorder=3)
+        ax.bar_label(b, ["%.3f" % x for x in exp['runtimes']['Algorithm Runtime']], color="k")
+        b2 = ax2.bar(sizeValues, exp['runtimes']['Algorithm Runtime'], color="deeppink", zorder=3)
+        ax2.bar_label(b2, ["%.3f" % x for x in exp['runtimes']['Algorithm Runtime']], color="k")
 
-    ax.set_xticks(sizeValues)
-    ax.set_xticklabels(sizeLables)
-    ax.set_xlabel("Problem Size")
+        ax.set_xticks(sizeValues)
+        ax.set_xticklabels(sizeLables)
+
+        ax.set_ylim([0.5*max(exp['runtimes']['Algorithm Runtime']), 1.1*max(exp['runtimes']['Algorithm Runtime'])])
+        ax2.set_ylim([0, math.ceil(sorted(exp['runtimes']['Algorithm Runtime'], reverse=True)[1])])
+
+        # ax.set_yscale('logit')
+        ax.spines.bottom.set_visible(False)
+        ax2.spines.top.set_visible(False)
+        ax.xaxis.tick_top()
+        ax.tick_params(labeltop=False)  # don't put tick labels at the top
+        ax2.xaxis.tick_bottom()
+
+        d = .5  # proportion of vertical to horizontal extent of the slanted line
+        kwargs = dict(marker=[(-1, -d), (1, d)], markersize=12,
+                    linestyle="none", color='k', mec='k', mew=1, clip_on=False)
+        ax.plot([0, 1], [0, 0], transform=ax.transAxes, **kwargs)
+        ax2.plot([0, 1], [1, 1], transform=ax2.transAxes, **kwargs)
+
+        ax.grid(axis='y', alpha=0.5, linestyle="dotted", zorder=0)
+        ax2.grid(axis='y', alpha=0.5, linestyle="dotted", zorder=0)
+
+        fig.tight_layout(rect=[0.025, 0.025, 1, 1])
+        fig.supylabel('Runtime (s)')
+        fig.supxlabel("Input Size")
+        plt.savefig(os.path.join("experiment_data_vis", f"{exp['name']}_algorithm_runtimes"))
+        plt.close()
     
-    ax.set_ylabel("Runtime (s)")
-    ax.set_ylim([0.9*min(exp['runtimes']['Algorithm Runtime']), 1.1*max(exp['runtimes']['Algorithm Runtime'])])
-    # ax.set_yticks(np.arange(20, 41, 2.5))
-    # ax.set_yticklabels([20,'',25,'',30,'',35,'',40])
+    else:
+        fig, ax = plt.subplots()
 
-    ax.grid(axis='y', alpha=0.5, linestyle="dotted", zorder=0)
+        b = ax.bar(sizeValues, exp['runtimes']['Algorithm Runtime'], color="deeppink", zorder=3)
+        ax.bar_label(b, ["%.3f" % x for x in exp['runtimes']['Algorithm Runtime']], color="k")
 
-    fig.tight_layout()
-    
-    plt.savefig(os.path.join("experiment_data_vis", f"{exp['name']}_algorithm_runtimes"))
-    plt.close()
+        ax.set_xticks(sizeValues)
+        ax.set_xticklabels(sizeLables)
+        ax.set_xlabel("Input Size")
+        
+        ax.set_ylabel("Runtime (s)")
+        ax.set_ylim([0.9*min(exp['runtimes']['Algorithm Runtime']), 1.1*max(exp['runtimes']['Algorithm Runtime'])])
+        # ax.set_yticks(np.arange(20, 41, 2.5))
+        # ax.set_yticklabels([20,'',25,'',30,'',35,'',40])
+
+        ax.grid(axis='y', alpha=0.5, linestyle="dotted", zorder=0)
+
+        fig.tight_layout()
+        
+        plt.savefig(os.path.join("experiment_data_vis", f"{exp['name']}_algorithm_runtimes"))
+        plt.close()
 
 '''
 Circuit Barh
 '''
 #__________________________________
 def plot_circuit_stats(exp):
-    print("\033[K", f"Plotting Circuits", end='\r')
+    print("\033[K" f"Plotting Circuits", end='\r')
 
     xLables = [str(x) for x in exp['size']]
     xValues = np.arange(len(xLables))
@@ -252,35 +393,34 @@ def plot_circuit_stats(exp):
     
     ax_width.tick_params('y', labelleft=False)
     ax_width.yaxis.tick_right()
-    ax_width.set_ylabel("Problem Size")
+    ax_width.set_ylabel("Input Size")
     
     ax_width.legend(loc="lower left")
-    ax_width.grid(axis='y', alpha=0.5, linestyle="dotted", zorder=0)
+    ax_width.grid(axis='x', alpha=0.5, linestyle="dotted", zorder=0)
 
     #-------
-    depth_bar = ax_depth.barh(xValues, exp['depths']['Invert + Measurement'], height=0.4, label="Depth", color="springgreen", zorder=3)
+    depth_bar = ax_depth.barh(xValues-0.13, exp['depths']['Invert + Measurement'], height=0.4, label="Depth", color="springgreen", zorder=3)
     ax_depth.bar_label(depth_bar, exp['depths']['Invert + Measurement'], fontsize=9, padding=3, color="k")
-    
+
     xMaxLimPow = math.ceil(math.log(max(exp['depths']['Invert + Measurement']), 10))
 
     ax_depth.set_xscale('log')
-    # ax_depth.set_xlim([1, 10**xMaxLimPow])
     ax_depth.set_xticks([10**x for x in range(xMaxLimPow+1)])
     ax_depth.set_xticklabels([0] + [f"$10^{x}$" for x in range(1, xMaxLimPow+1)])
     
     ax_depth.set_yticks(xValues)
     ax_depth.set_yticklabels(xLables)
+    ax_depth.set_ylabel("Input Size")
+    ax_depth.yaxis.set_label_position("right")
 
     ax_depth.legend(loc="lower right")
     ax_depth.grid(axis='x', alpha=0.5, linestyle="dotted", zorder=0)
 
-    #-------
-    # fig.suptitle(exp['name'] + " Experiment: Circuits")
-    
+    #-------    
     plt.subplots_adjust(wspace=0.2, bottom=0.1, top=0.95, left=0.075, right=0.95)    
     # plt.tight_layout()
         
-    plt.savefig(os.path.join("experiment_data_vis", f"{exp['name']}_depths"))
+    plt.savefig(os.path.join("experiment_data_vis", f"{exp['name']}_circuit"))
     plt.close()
 
 '''
@@ -289,7 +429,7 @@ Data imshows
 #__________________________________
 def plot_data(exp):        
     for i in range(len(exp['data_points'])):
-        print("\033[K", f"Plotting Data {i+1}/{len(exp['data_points'])}", end='\r')
+        print("\033[K" f"Plotting Data {i+1}/{len(exp['data_points'])}", end='\r')
 
         input_data, output_pure = exp['data_points'][i]
         output_noisy = exp['noisy_data_points'][i][1]
@@ -322,7 +462,7 @@ def plot_data(exp):
 
         # For Pure and Noisy: input-expected-output-error distribution
         for plot, data in data_plots.items():
-            print("\033[K", f"Plotting Data {i+1}: {plot}", end='\r')
+            print("\033[K" f"Plotting Data {i+1}: {plot}", end='\r')
 
             fig, ax = plt.subplots()
 
@@ -411,7 +551,7 @@ Error violins
 '''
 #__________________________________
 def plot_errors(exp):
-    print("\033[K", f"Plotting Errors", end='\r')
+    print("\033[K" f"Plotting Errors", end='\r')
     
     if not global_p_diffs[exp['name']][0]: return
     bbox = dict(boxstyle="square,pad=0.3", fc="w", ec="k", lw=0.72)
@@ -427,7 +567,11 @@ def plot_errors(exp):
     ax.axes.get_xaxis().set_ticks(range(1, len(global_n_diffs[exp['name']][0])+1), global_p_diffs[exp['name']][1])
     ax.set_xlabel('Input size')
 
-    ticks_list = range(0, np.max([np.max(x) for x in global_p_diffs[exp['name']][0]]), 5)
+    if exp['name'] == "FRQI":
+        ticks_list = range(0, np.max([np.max(x) for x in global_p_diffs[exp['name']][0]])+1, 5)
+    else:
+        ticks_list = range(0, np.max([np.max(x) for x in global_p_diffs[exp['name']][0]])+1, 1)
+
     ax.axes.get_yaxis().set_ticks(ticks_list, ticks_list)
     ax.set_ylabel('Absolute error values')
     
@@ -460,13 +604,153 @@ def plot_errors(exp):
     plt.savefig(os.path.join("experiment_data_vis", f"{exp['name']}_noisy_error_violins"), bbox_inches='tight')
     plt.close()
 
+'''
+Runtime Comparisons
+'''
+#__________________________________
+def plot_runtime_comparisons(exp_list):
+    print("\033[K" f"Plotting Comp - runtime", end='\r')
+
+    max_val = 0
+
+    fig, ax = plt.subplots()
+
+    for exp in exp_list:
+        data = copy.deepcopy(exp['runtimes']['Encoder'])
+        max_val = max(max_val, max(data))
+
+        data, mask = get_masked_data(data, exp['size'])
+
+
+        ax.scatter(np.arange(len(global_sizes))[mask], data[mask], color=global_colors[exp['name']], marker=global_markers[exp['name']])
+        ax.plot(np.arange(len(global_sizes))[mask], data[mask], label=exp['name'], color=global_colors[exp['name']], marker=global_markers[exp['name']], linestyle="-.", alpha=0.8)
+
+        # polyfit on runtimes
+        # m, b = np.polyfit( exp['size'], exp['runtimes']['Encoder'], deg=1)
+
+        # ax.plot(np.arange(len(global_sizes))[mask], m*np.array(exp['size'])+b, color=colors[exp['name']], linestyle="-.", alpha=0.3)
+
+    ax.set_yscale('symlog')
+    # ax.set_ylim(bottom=0)
+    ax.grid(alpha=0.2)
+    ax.axes.get_xaxis().set_ticks(np.arange(len(global_sizes)), global_sizes)
+    ax.set_xlabel("Input Size")
+    ax.set_ylabel("Runtime (s)")
+
+    fig.legend(loc="upper right")
+
+    fig.tight_layout()
+
+    plt.savefig(os.path.join("experiment_data_vis", f"compare_runtime"))
+    plt.close()
+
+'''
+Circuit comparisons
+'''
+#__________________________________
+def plot_circuit_comparisons(exp_list):
+    print("\033[K" f"Plotting Comp - circuit", end='\r')
+
+    tr = None
+    fig, ax =  plt.subplots()
+    
+    for exp in exp_list:
+        width_data = copy.deepcopy(exp['widths'])
+        width_data, width_mask = get_masked_data(width_data, exp['size'])
+
+        if exp['name'] == "Phase":
+            ax.plot(np.arange(len(global_sizes))[width_mask], width_data[width_mask], color=global_colors[exp['name']], linestyle='-', marker=global_markers[exp['name']], label=exp['name'], transform=tr)
+        
+        else:
+            ax.plot(np.arange(len(global_sizes))[width_mask], width_data[width_mask], color=global_colors[exp['name']], linestyle='-', marker=global_markers[exp['name']], label=exp['name'])
+
+        if exp['name'] == "Qubit Lattice":
+            tr = mtrans.offset_copy(ax.transData, fig=fig, x=1, y=-1.5, units='points')
+
+    ax.spines.right.set_visible(False)
+    ax.spines.top.set_visible(False)
+    ax.axes.get_xaxis().set_ticks(np.arange(len(global_sizes)), global_sizes)
+    ax.grid(axis='y', alpha=0.5, linestyle="dotted", zorder=0)
+    
+    ax.set_ylabel("Circuit width")
+    ax.set_xlabel("Input Size")
+
+    fig.legend(loc="upper right")
+    
+    plt.tight_layout()
+
+    plt.savefig(os.path.join("experiment_data_vis", f"compare_width"))
+    plt.close()
+
+    #-------
+    fig, ax =  plt.subplots()
+
+    for exp in exp_list:
+        depth_data = copy.deepcopy(exp['depths']['Invert + Measurement'])
+        depth_data, depth_mask = get_masked_data(depth_data, exp['size'])
+
+        ax.plot(np.arange(len(global_sizes))[depth_mask], depth_data[depth_mask], color=global_colors[exp['name']], linestyle='-', marker=global_markers[exp['name']], label=exp['name'])
+    
+    ax.spines.right.set_visible(False)
+    ax.spines.top.set_visible(False)
+    ax.set_yscale('log')
+    ax.axes.get_xaxis().set_ticks(np.arange(len(global_sizes)), global_sizes)
+    ax.grid(axis='y', alpha=0.5, linestyle="dotted", zorder=0)
+    
+    ax.set_ylabel("Circuit epth")
+    ax.set_xlabel("Input Size")
+
+    # fig.legend(loc="upper left")
+
+    plt.tight_layout()
+
+    plt.savefig(os.path.join("experiment_data_vis", f"compare_depth"))
+    plt.close()
+    
+'''
+Fidelities
+'''
+def plot_fidelity_comparisons(exp_list):
+    print("\033[K" f"Plotting Comp - fidelities", end='\r')
+
+    fig, ax = plt.subplots()
+
+    for exp in exp_list:
+        data = copy.deepcopy(exp['fidelities'])
+        data, mask = get_masked_data(data, exp['size'])
+
+        name = exp['name']
+        
+        if name == "Qubit Lattice":
+            offset = -0.3
+        elif name == "Phase":
+            offset = 0
+        elif name == "FRQI":
+            offset = 0.3
+
+        bar = ax.bar(np.arange(len(global_sizes))[mask]+offset, data[mask], label=name, color=global_colors[name], width=0.3, alpha=0.8)
+        ax.bar_label(bar, ["%.2f" % x for x in data[mask]], fontsize=7, padding=2, color="k")
+        
+        ax.plot(np.arange(len(global_sizes))[mask]+offset, data[mask], color=global_colors[name], marker=global_markers[name], linestyle="-.")
+
+    ax.grid(axis="y", alpha=0.2)
+    ax.axes.get_xaxis().set_ticks(np.arange(len(global_sizes)), global_sizes)
+    ax.set_xlabel("Input Size")
+    ax.set_ylabel("Fidelity")
+
+    fig.legend(loc="upper right")
+
+    fig.tight_layout()
+
+    plt.savefig(os.path.join("experiment_data_vis", f"compare_fidelity"))
+    plt.close()
 
 '''
 Backend comparative imshow
 '''
 #__________________________________
 def plot_backends(backend_comparison_dict):
-    print("\033[K", f"Plotting Backends", end='\r')
+    print("\033[K" f"Plotting Backends", end='\r')
     for plot, color in [('accuracy', 'plasma_r'), ('runtimes', 'viridis')]:
         fig, ax = plt.subplots()
 
@@ -539,7 +823,7 @@ Shots Trends (FRQI - 256)
 '''
 #__________________________________
 def plot_shots(shots_dict):
-    print("\033[K", f"Plotting Shots", end='\r')
+    print("\033[K" f"Plotting Shots", end='\r')
     bbox = dict(boxstyle="square,pad=0.3", fc="w", ec="k", lw=0.72)
 
     fig, (ax_runtime, ax_accuracy) = plt.subplots(2, 1, sharex=True)
@@ -578,26 +862,52 @@ def plot_shots(shots_dict):
     plt.close()
 
 '''
-Error violins
+SupermarQ features
 '''
 #__________________________________
 def plot_supermarq(exp):
-    print("\033[K", f"Plotting smQ", end='\r')
-    supermarq_metrics.plot_benchmark(data=[exp['widths'], exp['supermarq_metrics']], show=False, savefn=os.path.join("experiment_data_vis", "Qubit Lattice_supermarq"))
+    print("\033[K" f"Plotting smQ", end='\r')
 
+    supermarq_metrics.plot_benchmark(data=[exp['widths'], exp['supermarq_metrics']], show=False, savefn=os.path.join("experiment_data_vis", f"{exp['name']}_supermarq"), spoke_labels=["Conn", "Liv", "Par", "Ent", "CD"])
+
+#__________________________________
+
+'''
+Run all plots - external use
+'''
 #__________________________________
 def plot(exp_dict=None, shots_dict=None):
     try:
         if exp_dict:
+            if not exp_dict['runtimes']['Algorithm Runtime']:
+                calculate_total_algorithm_runtime(exp_dict)
+
             plot_runtimes(exp=exp_dict)
             plot_circuit_stats(exp_dict)
             plot_data(exp=exp_dict)
             plot_supermarq(exp=exp_dict)
+        
         if shots_dict:
             plot_shots(shots_dict=shots_dict)
+    
     except Exception as e:
         print(f"! ERROR while plotting !\n\t{traceback.format_exc()}\nDict:\n\t{exp_dict or shots_dict}\n")
 
+'''
+Run comparative plots - external use
+'''
+#__________________________________
+def plot_compare(exp_list):
+    try:
+        plot_circuit_comparisons(exp_list)
+        plot_runtime_comparisons(exp_list)
+        plot_fidelity_comparisons(exp_list)
+    except Exception as e:
+        print(f"! ERROR while plotting !\n\t{traceback.format_exc()}")
+
+'''
+THE MAIN
+'''
 #__________________________________
 if __name__ == "__main__":
     if sys.argv[1][-3:] == "log":
@@ -607,10 +917,17 @@ if __name__ == "__main__":
 
     
     elif sys.argv[1][-3:] == "pkl":
-        with open(os.path.join("experiment_data", f"{sys.argv[1]}"), 'rb') as f:
-           exp = pickle.load(f)
-        # print(exp)
-        plot(exp)
+        if sys.argv[1].startswith('exp'):
+            with open(os.path.join("experiment_data", f"{sys.argv[1]}"), 'rb') as f:
+                exp = pickle.load(f)
+                # print(exp)
+            plot_compare(exp)
+        
+        else:    
+            with open(os.path.join("experiment_data", f"{sys.argv[1]}"), 'rb') as f:
+                exp = pickle.load(f)
+            # print(exp)
+            plot(exp)
 
     elif sys.argv[1] == "backend":
         plot_backends(backend_comparison_dict=backend_comparison_dict)
