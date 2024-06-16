@@ -15,11 +15,6 @@ import numpy.typing as npt
 from matplotlib.patches import Circle
 from matplotlib.projections import register_projection
 from matplotlib.projections.polar import PolarAxes
-
-def compute_multi_qubit_ops(dag):
-    for node in dag.topological_op_nodes():
-        if node.op.num_qubits > 1:
-            yield(node)
              
 def compute_communication_with_qiskit(circuit: qiskit.QuantumCircuit) -> float:
     """Compute the program communication of the given quantum circuit.
@@ -38,6 +33,7 @@ def compute_communication_with_qiskit(circuit: qiskit.QuantumCircuit) -> float:
 
     graph = nx.Graph()
     for op in dag.two_qubit_ops():
+    # for op in compute_multi_qubit_ops(dag):
         q1, q2 = op.qargs
         graph.add_edge(circuit.find_bit(q1).index, circuit.find_bit(q2).index)
 

@@ -53,13 +53,13 @@ def qubitLatticeEncoder(qc: QuantumCircuit, angles: np.array, measure = False, v
     for i, ang in enumerate(angles):
         qc.ry(ang, i)
     
-    sv = Statevector(qc)
+    # sv = Statevector(qc)
     if verbose: print(sv)
     
     if measure: qc.measure(reversed(range(len(angles))), range(len(angles)))
     else: qc.barrier()
 
-    return sv
+    return None
 
 #___________________________________
 # INVERTER LOGIC

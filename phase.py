@@ -60,13 +60,13 @@ def phaseEncoder(qc: QuantumCircuit, angles: np.array, measure = False, verbose 
     for i in range(len(angles)):
         qc.h(i)
 
-    sv = Statevector(qc)
+    # sv = Statevector(qc)
     if verbose: print(sv)
     
     if measure: qc.measure(range(len(angles)), range(len(angles)))
     else: qc.barrier()
 
-    return sv
+    return None
 
 #___________________________________
 # INVERTER LOGIC

@@ -54,7 +54,6 @@ ibmq_experiment_dict = {
     "shots": [],
     "runtimes":{
         "Encoder": [],
-        "Invert + Measurement": [],
         "Transpile": [],
         "Simulate": [],
         "Decoder": [],
@@ -63,16 +62,17 @@ ibmq_experiment_dict = {
     "depths": {
         "Encoder": [],
         "Invert + Measurement": [],
-        "Transpile": [],
-        "Simulate": []
+        "Transpile": []
     },
     "widths": [],
     "accuracy": [],
-    "fidelity": [],
+    "fidelities": [],
     "supermarq_metrics": [],
     "count_ops": [],
     "data_points": [],
     "jobs": [],
+    "results": [],
+    "stateVectors": [],
     "meta_Data": None
 }
 
@@ -87,14 +87,14 @@ backend_comparison_dict = {
     "name": "FRQI",
     "backend": ["StateVec", "Pure Sim", "Noisy Sim", "IBMQ"],
     "size": [4, 16, 64, 256],
-    "runtimes": [[5, 10, 15, 20],
-                [27, 28, 29, 36],
-                [27, 29, 32, 38],
-                [25, 28, 33, 43]],
+    "runtimes": [[0.02, 0.05, 0.11, 1.02],
+                [0.10, 1.164, 2.93, 9.95],
+                [0.114, 1.328, 4.351, 30.454],
+                [6.20, 14.33, 35.95, 35.95]],
     "accuracy": [[100, 100, 100, 100],
-                [35, 33, 33, 30],
-                [33, 32, 32, 30],
-                [30, 28, 28, 29]]
+                [99.27, 97.16, 89.46, 83.18],
+                [89.71, 86.07, 82.08, 72.39],
+                [69.44, 59.21, 57.24, 57.24]]
 }
 
 # diffs and their names
@@ -110,8 +110,8 @@ global_n_diffs = {
     "FRQI": [[], []] 
 }
 
-# global_sizes = np.array([4, 9, 16, 25, 64, 256]).astype(int)
-global_sizes = np.array([4, 9, 16, 64, 256]).astype(int)
+global_sizes = np.array([4, 9, 16, 25, 64, 256]).astype(int)
+# global_sizes = np.array([4, 9, 16, 64, 256]).astype(int)
 
 global_colors = {'Qubit Lattice': 'darkorange', 'Phase': "limegreen", "FRQI": "royalblue"}
 global_markers = {'Qubit Lattice': "o", 'Phase': "*", "FRQI": "P"}
@@ -160,13 +160,15 @@ def calculate_total_algorithm_runtime(exp):
 def get_masked_data(data, sizes):
     local_size_len = len(sizes)
     global_size_len = len(global_sizes)
-
     j = 0
-    for i in range(global_size_len):            
+
+    for i in range(global_size_len):     
+
         if j >= local_size_len:
             data.insert(i, None) 
+            continue
 
-        elif global_sizes[i] != sizes[j]:
+        if global_sizes[i] != sizes[j]:
             data.insert(i, None)
 
         else: j += 1
@@ -372,6 +374,31 @@ def plot_runtimes(exp):
         plt.savefig(os.path.join("experiment_data_vis", f"{exp['name']}_algorithm_runtimes"))
         plt.close()
 
+    #-------
+    fig, ax = plt.subplots()
+
+    b1 = ax.bar(sizeValues-0.2, exp['runtimes']['Encoder'], color="dodgerblue", zorder=3, width=0.4, label="Encoding")
+    ax.bar_label(b1, ["%.2f" % x for x in exp['runtimes']['Encoder']], color="k")
+
+    b2 = ax.bar(sizeValues+0.2, exp['runtimes']['Algorithm Runtime'], color="deeppink", zorder=3, width=0.4, label="Total")
+    ax.bar_label(b2, ["%.2f" % x for x in exp['runtimes']['Algorithm Runtime']], color="k")
+    
+    ax.set_xticks(sizeValues)
+    ax.set_xticklabels(sizeLables)
+    ax.set_xlabel("Input Size")
+
+    # ax.set_ylim([0, 1.1*max(exp['runtimes']['Encoder'])])
+    ax.set_ylabel("Runtime (s)")
+
+    ax.grid(axis='y', alpha=0.5, linestyle="dotted", zorder=0)
+
+    fig.tight_layout()
+    fig.legend(loc="upper left")
+
+    plt.savefig(os.path.join("experiment_data_vis", f"{exp['name']}_enc_alg_runtimes"))
+    plt.close()
+
+
 '''
 Circuit Barh
 '''
@@ -480,7 +507,7 @@ def plot_data(exp):
                         if (side < 16 or (side >= 16 and data[x, y] == np.max(data))) and data[x, y] != 0:
                             text = ax.text(y, x, data[x, y], ha="center", va="center", color="w")
 
-                title_string = f"{'Pure' if 'pure' in plot else 'Noisy'} Simulator: Absolute Diff\n~{round(np.count_nonzero(data==0)*100/len(input_data), 2)}% accuracy"
+                if 'pure' in plot: print(f"\n\n\t{'Pure' if 'pure' in plot else 'Noisy'} Simulator: Absolute Diff\n~{round(np.count_nonzero(data==0)*100/len(input_data), 2)}% accuracy")
             
             else:
                 im = ax.imshow(np.reshape(data, (side, side)), cmap='gray')
@@ -901,7 +928,7 @@ def plot_compare(exp_list):
     try:
         plot_circuit_comparisons(exp_list)
         plot_runtime_comparisons(exp_list)
-        plot_fidelity_comparisons(exp_list)
+        # plot_fidelity_comparisons(exp_list)
     except Exception as e:
         print(f"! ERROR while plotting !\n\t{traceback.format_exc()}")
 
@@ -910,6 +937,8 @@ THE MAIN
 '''
 #__________________________________
 if __name__ == "__main__":
+    # plot_backends(backend_comparison_dict)
+    # exit()
     if sys.argv[1][-3:] == "log":
         log_file = os.path.join("experiment_data", f"btq_{sys.argv[1]}")
         exp = parse_log(log_file)

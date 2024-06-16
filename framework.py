@@ -24,6 +24,7 @@ import phase
 import frqi
 import btq_plotter
 import supermarq_metrics
+import traceback
 
 # setup logging
 os.makedirs("./experiment_data", exist_ok=True)
@@ -65,6 +66,9 @@ def getIBMQtoken():
         print("ibmq.token file not found. Aborting.")
         exit()
 
+def getIBMQService():
+    return QiskitRuntimeService(channel="ibm_quantum", token=getIBMQtoken())
+
 ''' Noisy backend'''
 def setupNoisyBackend():
     qiskitService = QiskitRuntimeService(channel="ibm_quantum", token=getIBMQtoken())
@@ -87,12 +91,14 @@ def setupNoisyBackend():
     ''' Noisy model from QiskitRuntimeService: https://docs.quantum.ibm.com/api/qiskit-ibm-runtime/dev/fake_provider '''
     noisy_backend = qiskitService.get_backend('ibm_kyoto')
     noisy_backend = AerSimulator.from_backend(noisy_backend)
+    return noisy_backend
 
 ''' IBMQ Hardware '''
 def setupIBMQBackend():
     qiskitService = QiskitRuntimeService(channel="ibm_quantum", token=getIBMQtoken())
+    
     # To run on hardware, select the backend with the fewest number of jobs in the queue
-    ibmq_backend = qiskitService.least_busy(operational=True, simulator=False)
+    return qiskitService.least_busy(operational=True, simulator=False)
 
 #___________________________________
 # INPUT
@@ -119,18 +125,20 @@ def prepareInput(n=4, input_range=(0, 255), angle_range=(0, np.pi/2), dist="line
 #___________________________________
 # TRANSPILE CIRCUIT
 def transpileCircuit(qc: QuantumCircuit, noisy=False, backend="simulator"):
+    # return transpile(qc, backend=ibmq_backend, optimization_level=0, seed_transpiler=0,  basis_gates=['u', 'cx'])
     if backend == "simulator":
         if noisy:
-            return transpile(qc, noisy_backend, basis_gates=['u', 'cx'])
-        else:
             return transpile(qc, pure_backend, basis_gates=['u', 'cx'])
+        else:
+            return transpile(qc, noisy_backend, basis_gates=['u', 'cx'])
     
     elif backend == "ibmq":
-        return transpile(qc, backend=ibmq_backend, optimization_level=3, seed_transpiler=0)
+        return transpile(qc, backend=ibmq_backend, optimization_level=1, seed_transpiler=0)
 
 #___________________________________
 # SIMULATE CIRCUIT
-def simulate(tqc: QuantumCircuit, shots, noisy=False, verbose=1, backend="simulator", mode="submit"):
+def simulate(tqc: QuantumCircuit, shots: int, noisy=False, verbose=1, backend="simulator"):
+    
     if backend == "simulator":
         if noisy:
             job = noisy_backend.run(tqc, shots=shots)
@@ -138,25 +146,25 @@ def simulate(tqc: QuantumCircuit, shots, noisy=False, verbose=1, backend="simula
             job = pure_backend.run(tqc, shots=shots)
 
             result = job.result()
+        
+        if verbose: logger.debug(result.get_counts())
+    
+        return result
 
     # https://learning.quantum.ibm.com/tutorial/submit-transpiled-circuits#step-3-execute-using-qiskit-primitives
     # https://docs.quantum.ibm.com/api/migration-guides/v2-primitives#steps-to-migrate-to-sampler-v2
     elif backend == "ibmq":
-        with Batch(service=qiskitService, backend=ibmq_backend):
-            sampler = Sampler()
-            job = sampler.run(
-                circuits=tqc,
-                skip_transpilation=True,
-                shots=10000,
-            )
-        
-        return job.job_id()
+        input("Waiting to submit to IBMQ")
+        job = ibmq_backend.run(circuits=tqc, shots=shots)
+        # with Batch(service=qiskitService, backend=ibmq_backend):
+        #     sampler = Sampler()
+        #     job = sampler.run(
+        #         circuits=tqc,
+        #         skip_transpilation=True,
+        #         shots=10000,
+        #     )
+        return job
 
-    if verbose:
-        logger.debug(result.get_counts())
-        # display(plot_histogram(counts))
-    
-    return result
 
 #___________________________________
 # SIMULATE CIRCUIT
@@ -182,7 +190,6 @@ def simulate_stateVec(qc: QuantumCircuit, verbose=1):
         # display(plot_histogram(counts))
     
     return counts
-
 
 #___________________________________
 # Calulate hellinger_fidelity
@@ -282,13 +289,13 @@ def qubitLatticeExperiment(n=4, shots=1000000, verbose=0, run_simulation=False, 
     #---------------------
 
         # fidelity
-        if exp_dict and not noisy:
-            big_endian_counts = {}
+        # if exp_dict and not noisy:
+        #     big_endian_counts = {}
             
-            for key, value in experiment_result_counts.items():
-                big_endian_counts[key[::-1]] = value
+        #     for key, value in experiment_result_counts.items():
+        #         big_endian_counts[key[::-1]] = value
             
-            exp_dict['fidelities'].append(calculate_fidelity(big_endian_counts, stateVector))
+        #     exp_dict['fidelities'].append(calculate_fidelity(big_endian_counts, stateVector))
     
     #---------------------
 
@@ -344,7 +351,7 @@ def phaseExperiment(n=4, shots=1000000, verbose=0, run_simulation=False, exp_dic
     Returns:
         exp_dict, circuit, accuracy 
     """
-    logger.debug(f'> Qubit Lattice Experiment:: Image size: {math.sqrt(n)} x {math.sqrt(n)}\tShots: {shots} (noisy={noisy})')
+    logger.debug(f'> Phase Encoding Experiment:: Image size: {math.sqrt(n)} x {math.sqrt(n)}\tShots: {shots} (noisy={noisy})')
     
     init_time = time.process_time()
 
@@ -419,8 +426,8 @@ def phaseExperiment(n=4, shots=1000000, verbose=0, run_simulation=False, exp_dic
     #---------------------
 
         # fidelity
-        if exp_dict and not noisy:
-            exp_dict['fidelities'].append(calculate_fidelity(experiment_result_counts, stateVector))
+        # if exp_dict and not noisy:
+        #     exp_dict['fidelities'].append(calculate_fidelity(experiment_result_counts, stateVector))
 
     #---------------------
 
@@ -512,7 +519,6 @@ def frqiExperiment(n=4, shots=1000000, verbose=0, run_simulation=False, exp_dict
         exp_dict["depths"]["Invert + Measurement"].append(circuit.depth())
 
     if verbose: logger.debug(f'Circuit depth: {circuit.depth()}\tCircuit Width: {circuit.num_qubits}')
-
     #---------------------
 
     # transpile
@@ -527,7 +533,7 @@ def frqiExperiment(n=4, shots=1000000, verbose=0, run_simulation=False, exp_dict
             exp_dict["depths"]["Transpile"].append(tcircuit.depth())
             exp_dict["count_ops"].append(tcircuit.count_ops())
     logger.info(f'{{"Profiler":"Transpile", "runtime":"{end_time}", "depth":"{tcircuit.depth()}", "width":"{tcircuit.num_qubits}", "count_ops":"{tcircuit.count_ops()}", "Exp":"FRQI,{n},{shots}"}}')
-    
+
     #---------------------
     
     # run experiment
@@ -553,8 +559,8 @@ def frqiExperiment(n=4, shots=1000000, verbose=0, run_simulation=False, exp_dict
     #---------------------
 
         # fidelity        
-        if exp_dict and not noisy:
-            exp_dict['fidelities'].append(calculate_fidelity(experiment_result_counts, stateVector))
+        # if exp_dict and not noisy:
+        #     exp_dict['fidelities'].append(calculate_fidelity(experiment_result_counts, stateVector))
 
     #---------------------
 
@@ -595,7 +601,7 @@ def frqiExperiment(n=4, shots=1000000, verbose=0, run_simulation=False, exp_dict
 
 #___________________________________
 # FRQI EXPERIMENT IBMQ
-def frqiExperimentIBMQ(n=4, shots=1000000, verbose=0, mode="Submit", exp_dict=None, dist="linear"):
+def frqiExperimentIBMQ(n=4, shots:int=10000, verbose=0, mode="Submit", exp_dict=None, dist="linear"):
     """_summary_
 
     Args:
@@ -611,9 +617,10 @@ def frqiExperimentIBMQ(n=4, shots=1000000, verbose=0, mode="Submit", exp_dict=No
     Returns:
         _type_: _description_
     """
-    logger.debug(f'> FRQI Experiment IBMQ:: Image size: {math.sqrt(n)} x {math.sqrt(n)}\tShots: {shots} (jobs: {jobs})')
+    logger.debug(f'> FRQI Experiment IBMQ:: Image size: {math.sqrt(n)} x {math.sqrt(n)}\tShots: {shots} (mode: {mode} = {mode == "decode"})')
 
     if mode == "submit":
+
         init_time = time.process_time()
         # input
         input_vector, input_angles = prepareInput(n=n, input_range=(0, 255), angle_range=(0, np.pi/2), dist=dist, verbose=verbose)
@@ -621,82 +628,110 @@ def frqiExperimentIBMQ(n=4, shots=1000000, verbose=0, mode="Submit", exp_dict=No
         # citcuit
         circuit = QuantumCircuit()
 
+        #---------------------
+
         # encode
         frqi.frqiEncoder(qc=circuit, angles=input_angles, verbose=verbose)
-        
-        logger.info(f'{{"Profiler":"Encoder", "runtime":"{time.process_time() - init_time}", "depth":"{circuit.depth()}", "width":"{circuit.num_qubits}", "Exp":"FRQI,{n},{shots}"}}')
-        exp_dict["runtimes"]["Encoder"].append(time.process_time() - init_time)
+        end_time = time.process_time() - init_time
+            
+        exp_dict["runtimes"]["Encoder"].append(end_time)
         exp_dict["depths"]["Encoder"].append(circuit.depth())
         exp_dict["widths"].append(circuit.num_qubits)
+        logger.info(f'{{"Profiler":"Encoder", "runtime":"{end_time}", "depth":"{circuit.depth()}", "width":"{circuit.num_qubits}", "Exp":"FRQI,{n},{shots}"}}')
+
+        #---------------------
 
         # invert + measurements
-        init_time = time.process_time()
         frqi.invertPixels(qc=circuit, verbose=verbose)
 
-        # if exp_dict: exp_dict['ideal_distributions'].append(Statevector.from_instruction(circuit).probabilities_dict())
+        stateVector = Statevector(circuit)
+        exp_dict['stateVectors'].append(stateVector)
 
         frqi.addMeasurements(qc=circuit, verbose=verbose)
-        
-        logger.info(f'{{"Profiler":"Invert + Measurement", "runtime":"{time.process_time() - init_time}", "depth":"{circuit.depth()}", "width":"{circuit.num_qubits}", "Exp":"FRQI,{n},{shots}"}}') 
-        exp_dict["runtimes"]["Invert + Measurement"].append(time.process_time() - init_time)
+
+        logger.info(f'{{"Profiler":"Invert + Measurement", "depth":"{circuit.depth()}", "width":"{circuit.num_qubits}", "Exp":"FRQI,{n},{shots}"}}') 
         exp_dict["depths"]["Invert + Measurement"].append(circuit.depth())
 
         if verbose: logger.debug(f'Circuit depth: {circuit.depth()}\tCircuit Width: {circuit.num_qubits}')
+
+        #---------------------
 
         # transpile
         init_time = time.process_time()
         tcircuit = transpileCircuit(qc=circuit, backend="ibmq")
         
-        logger.info(f'{{"Profiler":"Transpile", "runtime":"{time.process_time() - init_time}", "depth":"{tcircuit.depth()}", "width":"{tcircuit.num_qubits}", "count_ops":"{tcircuit.count_ops()}", "Exp":"FRQI,{n},{shots}"}}')
-        exp_dict["runtimes"]["Transpile"].append(time.process_time() - init_time)
+        # with open(os.path.join('experiment_data', f'frqi_ibmq_{n}x{n}.qpy'), 'rb') as f:
+        #     tcircuit = qpy.load(f)[0]
+        
+        end_time = time.process_time() - init_time
+        
+        exp_dict["runtimes"]["Transpile"].append(end_time)
         exp_dict["depths"]["Transpile"].append(circuit.depth())
-            
+        logger.info(f'{{"Profiler":"Transpile", "runtime":"{end_time}", "depth":"{tcircuit.depth()}", "width":"{tcircuit.num_qubits}", "count_ops":"{tcircuit.count_ops()}", "Exp":"FRQI,{n},{shots}"}}')
+
+        exp_dict['count_ops'].append(tcircuit.count_ops())
+        
         # store transpiled circuit
-        with open(os.path.join('experiment_data', f'frqi_ibmq_{n}x{n}_{circuit.num_qubits}.qpy'), 'wb') as f:
-            qpy.dump(tcircuit, f)
-
-        exp_dict['jobs'].append(tcircuit)
-
-        # return experiment
-        return exp_dict
-
-    elif mode == "run":
-        # load transpiled circuit
-        with open(os.path.join('experiment_data', f'frqi_{n}x{n}_{circuit.num_qubits}.qpy'), 'rb') as f:
-            stored_tcircuit = qpy.load(f)[0]
+        # with open(os.path.join('experiment_data', f'frqi_ibmq_{n}x{n}.qpy'), 'wb') as f:
+        #     qpy.dump(tcircuit, f)
+        
+        #---------------------
 
         # simulate
         init_time = time.process_time()
-        experiment_result_counts = simulate(tqc=tcircuit, shots=shots, verbose=verbose, backend=backend)
-        
+        job = simulate(tqc=tcircuit, shots=shots, verbose=verbose, backend="ibmq")
+
         logger.info(f'{{"Profiler":"Simulate", "runtime":"{time.process_time() - init_time}", "depth":"{tcircuit.depth()}", "width":"{tcircuit.num_qubits}", "Exp":"FRQI,{n},{shots}"}}')
         exp_dict["runtimes"]["Simulate"].append(time.process_time() - init_time)
-        exp_dict["depths"]["Simulate"].append(circuit.depth())
+        exp_dict['jobs'].append(job)
 
         return exp_dict
 
     elif mode == "decode":
-        # decode
-        init_time = time.process_time()
-        output_vector = frqi.frqiDecoder(counts=experiment_result_counts, n=n)
-        
-        logger.info(f'{{"Profiler":"Decoder", "runtime":"{time.process_time() - init_time}", "Exp":"FRQI,{n},{shots}"}}')
-        if exp_dict:
-            exp_dict["runtimes"]["Decoder"].append(time.process_time() - init_time)
-        
-        # data points
-        logger.info(f'{{"Profiler":"Data Points", "original_values": {list(input_vector)}, "reconstructed_values": {output_vector}}}')
-        if exp_dict:
-            exp_dict['data_points'].append([list(input_vector), list(output_vector)])
-        
-        # accuracy
-        accuracy = statistics.fmean([1 - round(abs(output_vector[i] - (255 - input_vector[i]))/max((255 - input_vector[i]), output_vector[i]),4) if (255-input_vector[i]) != output_vector[i] else 1 for i in range(n)])
-        logger.info(f'{{"Profiler":"Accuracy", "value":"{accuracy}", "Exp":"FRQI,{n},{shots}"}}')
 
-        if exp_dict:
+        try:
+            if not exp_dict['results']:
+                for job in exp_dict['jobs']:
+                    retrieved_job = qiskitService.job(job)
+                    result = retrieved_job.result()    
+                    exp_dict['results'].append(result)
+
+        except Exception as e:
+            print({traceback.format_exc()})
+
+        #---------------------
+        for i, result in enumerate(exp_dict['results']):
+            input_vector, input_angles = prepareInput(n=exp_dict['size'][i], input_range=(0, 255), angle_range=(0, np.pi/2), dist=dist, verbose=verbose)
+            # decode
+            experiment_result_counts = result.get_counts()
+
+            exp_dict["runtimes"]["Simulate"].append(result.time_taken)
+
+
+            init_time = time.process_time()
+            output_vector = frqi.frqiDecoder(counts=experiment_result_counts, n=exp_dict['size'][i])
+            end_time = time.process_time() - init_time
+            
+            logger.info(f'{{"Profiler":"Decoder", "runtime":"{end_time}", "Exp":"FRQI,{exp_dict["size"][i]},{shots}"}}')
+            if exp_dict:
+                exp_dict["runtimes"]["Decoder"].append(end_time)
+            
+        #---------------------
+
+            # data points
+            logger.info(f'{{"Profiler":"Data Points", "original_values": {list(input_vector)}, "reconstructed_values": {output_vector}}}')
+            if exp_dict:
+                exp_dict['data_points'].append([list(input_vector), list(output_vector)])
+
+        #---------------------
+
+            # accuracy
+            accuracy = statistics.fmean([1 - round(abs(output_vector[i] - (255 - input_vector[i]))/max((255 - input_vector[i]), output_vector[i]),4) if (255-input_vector[i]) != output_vector[i] else 1 for i in range(exp_dict['size'][i])])
+            logger.info(f'{{"Profiler":"Accuracy", "value":"{accuracy}", "Exp":"FRQI,{exp_dict["size"][i]},{shots}"}}')
+
             exp_dict['accuracy'].append(accuracy)
         
-    return exp_dict, circuit, accuracy
+        return exp_dict
 
 #___________________________________
 # DEFAULTS:
@@ -718,22 +753,26 @@ experiments = "all"
 if __name__ == "__main__":
     
     # cmd arguments
-    if len(sys.argv) > 1 and sys.argv[1] in ["all", "ql", "phase", "frqi", "ibmq", "shots"]: 
+    if len(sys.argv) > 1 and sys.argv[1] in ["all", "ql", "ph", "frqi", "ibmq", "shots"]: 
         experiments = sys.argv[1]
 
     if len(sys.argv) > 2: 
         shots = sys.argv[2]
 
     if len(sys.argv) > 3 and sys.argv[3] in ["reversing", "random", "linear"]: 
-        dist = sys.argv[2]
+        dist = sys.argv[3]
 
-    if experiments in ["all", "ql", "ph", "frqi", "backend"]: 
-        setupNoisyBackend()
-        ql_ph_inputs = square_inputs(4)
+    if experiments in ["all", "ql", "ph", "frqi", "ibmq"]: 
+        # noisy_backend = setupNoisyBackend()
+        ibmq_backend = setupIBMQBackend()
+
+        ql_ph_inputs = square_inputs(5)
         frqi_inputs = power_inputs(4)
         exp_list = []
 
     print(f"\n- BTQ - Trial runs\t[{shots if experiments != 'shots' else '[5000, ..., 100000]'} shots - {dist} input - {experiments} experiments]\n")
+
+    # input("Human Intervention requested")
 
     if experiments in ["all", "ql"]:
         #----------------------------------
@@ -832,6 +871,8 @@ if __name__ == "__main__":
         print(f"FRQI Experiments")
 
         exp = btq_plotter.get_dict("exp")
+        backend_dict = btq_plotter.get_dict("backend")
+        
         exp['name'] = "FRQI"
 
         for i, input in enumerate(frqi_inputs):
@@ -916,47 +957,67 @@ if __name__ == "__main__":
         btq_plotter.plot(shots_dict=shots_dict)
 
     # =========================
-    elif experiments == "backend":
-        if "ibmq" in sys.argv:
-            setupIBMQBackend()
+    elif experiments == "ibmq":
+        print(f"FRQI IBMQ Experiments")
+        
+        qiskitService = getIBMQService()
 
-        print(f"FRQI Experiments")
+        print(f"Backend setup: {ibmq_backend.name}")
 
-        exp = btq_plotter.get_dict("backend")
+        exp = btq_plotter.get_dict("ibmq")
+        shots = 10000
 
-        for i, input in enumerate(frqi_inputs):
-            exp['size'].append(input)
-
-            # StateVec
-            init_time = time.process_time()
-            exp, circuit, accuracy = frqiExperiment(n=input, run_simulation=True, noisy=True, dist=dist, shots=shots)
-            
-            logger.info(f'{{"Profiler":"Algorithm Runtime", "runtime":"{time.process_time() - init_time}","Exp":"FRQI_backend,{input},{shots}"}}')
-            exp["runtimes"][i].append(time.process_time() - init_time)
-            exp["accuracy"][i].append(accuracy)
-
-            # Pure
-            init_time = time.process_time()
-            exp, circuit, accuracy = frqiExperiment(n=input, run_simulation=True, noisy=False, dist=dist, shots=shots)
-            
-            logger.info(f'{{"Profiler":"Algorithm Runtime", "runtime":"{time.process_time() - init_time}","Exp":"FRQI_backend,{input},{shots}"}}')
-            exp["runtimes"][i].append(time.process_time() - init_time)
-            exp["accuracy"][i].append(accuracy)
-
-            # Noisy
-            init_time = time.process_time()
-            exp, circuit, accuracy = frqiExperiment(n=input, run_simulation=True, noisy=True, dist=dist, shots=shots)
-            
-            logger.info(f'{{"Profiler":"Algorithm Runtime", "runtime":"{time.process_time() - init_time}","Exp":"FRQI_backend,{input},{shots}"}}')
-            exp["runtimes"][i].append(time.process_time() - init_time)
-            exp["accuracy"][i].append(accuracy)
+        custom_ibmq_experiment_dict = {
+            "name": None,
+            "size": [4, 16, 64],
+            "shots": [],
+            "runtimes":{
+                "Encoder": [],
+                "Transpile": [],
+                "Simulate": [],
+                "Decoder": [],
+                "Algorithm Runtime": [],
+            },
+            "depths": {
+                "Encoder": [],
+                "Invert + Measurement": [],
+                "Transpile": []
+            },
+            "widths": [],
+            "accuracy": [],
+            "fidelities": [],
+            "supermarq_metrics": [],
+            "count_ops": [],
+            "data_points": [],
+            "jobs": ["crvmvfndbt40008jvh50", "crvmvqyx484g008fa9pg", "crvmwxvy7jt000807jgg"],
+            "results": [],
+            "stateVectors": [],
+            "meta_Data": None
+        }
 
         # IBMQ
-        if "ibmq" in sys.argv:
-            for i, input in enumerate(frqi_inputs):
+        if "submit" in sys.argv:
+            ibmq_backend = setupIBMQBackend()
+
+            for i, _input in enumerate(frqi_inputs[-1:]):
+                print("\033[K", f"\t{i+1}/{len(frqi_inputs)} - {_input}", end='\r')
+
+                exp['size'].append(_input)
+
+                # input()
+
                 init_time = time.process_time()
-                exp, circuit, accuracy = frqiExperimentIBMQ(n=input, run_simulation=True, dist=dist, shots=shots, backend="ibmq")
+                exp = frqiExperimentIBMQ(n=_input, dist=dist, shots=shots, mode="submit", exp_dict=exp)
                 
-                logger.info(f'{{"Profiler":"Algorithm Runtime", "runtime":"{time.process_time() - init_time}","Exp":"FRQI_backend,{input},{shots}"}}')
-                exp["runtimes"][i].append(time.process_time() - init_time)
-                exp["accuracy"][i].append(accuracy)
+                logger.info(f'{{"Profiler":"Algorithm Runtime", "runtime":"{time.process_time() - init_time}","Exp":"FRQI_backend,{_input},{shots}"}}')
+                # exp["runtimes"][i].append(time.process_time() - init_time)
+                # exp["accuracy"].append(accuracy)
+
+            with open(os.path.join("experiment_data", f"exp_ibmq_{time.strftime('%Y-%m-%d')}.pkl"), 'wb') as f:
+                pickle.dump(exp_list, f)
+
+
+        elif "decode" in sys.argv:
+            exp = frqiExperimentIBMQ(n=0, dist=dist, shots=shots, mode="decode", exp_dict=custom_ibmq_experiment_dict)
+            print(exp['runtimes'], exp['accuracy'])
+
